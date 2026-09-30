@@ -1,0 +1,5 @@
+# Release zips are built outside the repo and attached to a release.
+*.zip
+# Windows Explorer's files
+Thumbs.db
+desktop.ini

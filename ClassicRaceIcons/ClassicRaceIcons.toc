@@ -1,0 +1,9 @@
+## Interface: 16001, 120100
+## Title: Classic Race Icons
+## Notes: Frames players' own portraits the way the Classic client did: the eight classic races and Skyborne (/cri tune).
+## Author: Jedborg
+## Version: 1.0.0
+## SavedVariables: ClassicRaceIconsDB
+## IconTexture: Interface\AddOns\ClassicRaceIcons\Media\Shot-Male-Scourge.tga
+
+ClassicRaceIcons.lua

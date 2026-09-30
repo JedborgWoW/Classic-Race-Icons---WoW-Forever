@@ -1,0 +1,5 @@
+# Text is stored with LF line endings (the game reads either); pictures are binary.
+* text=auto eol=lf
+*.tga binary
+*.png binary
+*.zip binary
