@@ -179,7 +179,7 @@ For the curious:
 
 * `ClassicRaceIcons/` — the addon: `ClassicRaceIcons.toc`, `ClassicRaceIcons.lua` and
   `Media/`.
-  * `Media/Shot-<Sex>-<Race>.tga` — the Classic (3.3.5a) client's portraits of each race
+  * `Media/Shot-<Sex>-<Race>.tga` — the Classic client's portraits of each race
     and sex (Blizzard Entertainment's art), cut out of screenshots of its player frame: the
     calibration window's *Classic* picture.
   * `Media/Outside.tga` — the black laid around a portrait that goes past Forever's
