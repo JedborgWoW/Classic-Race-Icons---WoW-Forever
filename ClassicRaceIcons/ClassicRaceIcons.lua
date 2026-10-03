@@ -126,6 +126,142 @@ local function ClassIconShown(unit, me)
     return human or unknown
 end
 
+-- Druid forms and the shaman's Ghost Wolf show a creature, not the race: such a portrait is
+-- left as Blizzard draws it (the user, 2026-10-03). Your own: the animal forms by their
+-- GetShapeshiftFormID, another form only when it changes your display (Blizzard's test in
+-- ModelSceneUtil.SetUpCharacterSheetScene), so stances, stealth and Shadowform still count
+-- as you; a form the client doesn't report as one, by its aura. Another player's: the form's
+-- aura, by spell ID or else by the form's name. While aura data is restricted (combat,
+-- encounters, challenge modes, PvP matches) a missing aura says nothing unless the forms are
+-- flagged never secret; then the last answer read for that player stands, and one never
+-- read stays Blizzard's.
+local MODEL_FORMS = { [1] = true, [2] = true, [3] = true, [4] = true, [5] = true, [16] = true,
+    [27] = true, [31] = true, [35] = true }   -- Blizzard's ANIMAL_FORMS, which Forever doesn't load
+local FORM_CLASSES = { DRUID = true, SHAMAN = true }
+local FORM_AURAS = {
+    768,     -- Cat Form
+    5487,    -- Bear Form
+    9634,    -- Dire Bear Form
+    783,     -- Travel Form
+    1066,    -- Aquatic Form
+    24858,   -- Moonkin Form
+    33891,   -- Tree of Life
+    33943,   -- Flight Form
+    40120,   -- Swift Flight Form
+    2645,    -- Ghost Wolf
+}
+local NEVER_SECRET = Enum and Enum.SecrecyLevel and Enum.SecrecyLevel.NeverSecret or 0
+
+-- Whether a missing form aura means no form: aura data isn't restricted now, or every form
+-- the client has is flagged never secret.
+local function FormAurasReadable()
+    local secrets = C_Secrets
+    if not (secrets and secrets.ShouldAurasBeSecret) then return true end
+    local ok, restricted = pcall(secrets.ShouldAurasBeSecret)
+    if ok and CanAccess(restricted) and not restricted then return true end
+    if not secrets.GetSpellAuraSecrecy then return false end
+    local exists = C_Spell and C_Spell.DoesSpellExist
+    local any = false
+    for _, id in ipairs(FORM_AURAS) do
+        local okExists, has = true, true
+        if exists then okExists, has = pcall(exists, id) end
+        if okExists and CanAccess(has) and has then
+            local okLevel, level = pcall(secrets.GetSpellAuraSecrecy, id)
+            if not (okLevel and CanAccess(level) and level == NEVER_SECRET) then return false end
+            any = true
+        end
+    end
+    return any
+end
+
+-- The forms' names in the client's language, for a form aura under another spell ID.
+local formNames
+local function FormNames()
+    if formNames then return formNames end
+    local get = C_Spell and C_Spell.GetSpellName
+    if type(get) ~= "function" then return {} end
+    local names, seen = {}, {}
+    for _, id in ipairs(FORM_AURAS) do
+        local ok, name = pcall(get, id)
+        if ok and CanAccess(name) and type(name) == "string" and name ~= "" and not seen[name] then
+            seen[name] = true
+            names[#names + 1] = name
+        end
+    end
+    if #names > 0 then formNames = names end
+    return names
+end
+
+-- The form auras on the unit: their spell IDs, or else the names found.
+local function FormAuras(unit)
+    local found = {}
+    local auras = C_UnitAuras
+    if not auras then return found end
+    if type(auras.GetUnitAuraBySpellID) == "function" then
+        for _, id in ipairs(FORM_AURAS) do
+            local ok, aura = pcall(auras.GetUnitAuraBySpellID, unit, id)
+            if ok and (not CanAccess(aura) or aura) then found[#found + 1] = id end   -- there, even if secret
+        end
+    end
+    if #found == 0 and type(auras.GetAuraDataBySpellName) == "function" then
+        for _, name in ipairs(FormNames()) do
+            local ok, aura = pcall(auras.GetAuraDataBySpellName, unit, name, "HELPFUL")
+            if ok and (not CanAccess(aura) or aura) then found[#found + 1] = name end
+        end
+    end
+    return found
+end
+
+-- A unit's form from its aura: true, false, or nil when it can't be read.
+local function AuraForm(unit)
+    local auras = C_UnitAuras
+    if not (auras and (auras.GetUnitAuraBySpellID or auras.GetAuraDataBySpellName)) then return nil end
+    if #FormAuras(unit) > 0 then return true end
+    if FormAurasReadable() then return false end
+    return nil
+end
+
+-- Whether your display is not your native one; nil when that can't be read.
+local function DisplayChanged()
+    local info = C_PlayerInfo
+    if not (info and info.GetDisplayID and info.GetNativeDisplayID) then return nil end
+    local okShown, shown = pcall(info.GetDisplayID)
+    local okNative, native = pcall(info.GetNativeDisplayID)
+    if okShown and okNative and CanAccess(shown) and CanAccess(native) and shown ~= 0 then
+        return shown ~= native
+    end
+    return nil
+end
+
+-- Your own form: true, false, or nil when it can't be read.
+local function MyForm()
+    if type(GetShapeshiftFormID) == "function" then
+        local ok, form = pcall(GetShapeshiftFormID)
+        if not ok or not CanAccess(form) then return nil end
+        if form and (MODEL_FORMS[form] or DisplayChanged()) then return true end
+    end
+    -- A form the client doesn't report as one: its aura.
+    local okClass, _, class = pcall(UnitClass, "player")
+    if not (okClass and CanAccess(class) and FORM_CLASSES[class]) then return false end
+    return AuraForm("player") == true
+end
+
+local formSeen = {}   -- another player's GUID -> their form when it was last read
+local function InForm(unit)
+    if IsMe(unit) then return MyForm() end
+    local ok, _, class = pcall(UnitClass, unit)
+    if not ok or not CanAccess(class) or not FORM_CLASSES[class] then return false end
+    local okGuid, guid = pcall(UnitGUID, unit)
+    if not okGuid or not CanAccess(guid) then guid = nil end
+    local form = AuraForm(unit)
+    if form ~= nil then
+        if guid then formSeen[guid] = form end
+        return form
+    end
+    if guid then return formSeen[guid] end
+    return nil
+end
+
 -- The unit's kind ("Scourge2"), whatever the settings; nil and why when there is none.
 local function KindOf(unit)
     if type(unit) ~= "string" then return nil, "no unit" end
@@ -150,6 +286,10 @@ local function KindFor(unit)
     local me = IsMe(unit)
     if not me and not db.others then return nil, "others off" end
     if ClassIconShown(unit, me) then return nil, CLASS_ICON end
+    local form = InForm(unit)
+    if form ~= false then return nil, form and "shapeshifted" or "form unknown" end
+    -- A dead night elf's ghost is a wisp (Wisp Spirit).
+    if KINDS[kind].race == "NightElf" and Flag(UnitIsGhost, unit) then return nil, "wisp" end
     if not (db.crops[kind] or DEFAULT_CROPS[kind]) then return nil, KINDS[kind].label .. " not cropped" end
     return kind, KINDS[kind].label
 end
@@ -634,11 +774,13 @@ local function CreateTuner()
     local HINT = "Shift = bigger steps. Saved per race and sex."
     local EDGE = "Edge of the client's picture: zoom in for more room."
     local PAST = "Past the client's picture: black around it (/cri shrink)."
+    local FORM = "In a form: change back to calibrate."
 
     -- Picks the unit (target, else you) and draws both pictures.
     function f:Pick()
         self.unit = TuneUnit()
         self.kind = self.unit and KindOf(self.unit)
+        self.form = self.kind and InForm(self.unit) ~= false
         if self.kind then
             SetPortraitTexture(self.live.tex, self.unit)
             self.classic.tex:SetTexture(KINDS[self.kind].picture)
@@ -667,7 +809,8 @@ local function CreateTuner()
         self.values:SetText(string.format("zoom %.2f   x %.2f   y %.2f%s", zoom, x, y, CropNote(self.kind)))
         local room = math.max(0, 0.5 - visible / zoom)
         if db.shrink then room = math.max(room, SHRINK_ROOM) end
-        self.hint:SetText(past and PAST or math.sqrt(x * x + y * y) >= room - 1e-6 and EDGE or HINT)
+        self.hint:SetText(self.form and FORM or past and PAST
+            or math.sqrt(x * x + y * y) >= room - 1e-6 and EDGE or HINT)
     end
 
     f:SetScript("OnEvent", function(self, event, unit)
@@ -843,6 +986,7 @@ events:RegisterEvent("ADDON_LOADED")
 events:RegisterEvent("PLAYER_LOGIN")
 events:RegisterEvent("CVAR_UPDATE")
 events:RegisterEvent("PLAYER_REGEN_ENABLED")
+events:RegisterEvent("UPDATE_SHAPESHIFT_FORM")
 events:SetScript("OnEvent", function(_, event, arg1)
     if event == "ADDON_LOADED" then
         if arg1 == ADDON then
@@ -859,10 +1003,11 @@ events:SetScript("OnEvent", function(_, event, arg1)
     elseif event == "CVAR_UPDATE" then
         if type(arg1) == "string" and CLASS_CVARS[arg1:lower()] then QueueRefresh() end
     elseif event == "PLAYER_REGEN_ENABLED" then
-        if coversWaiting then
-            coversWaiting = false
-            Refresh()
-        end
+        -- Covers wait for it, and other players' forms can be read again.
+        coversWaiting = false
+        Refresh()
+    elseif event == "UPDATE_SHAPESHIFT_FORM" then
+        QueueRefresh()   -- your own form, in case it changes after the portrait is redrawn
     end
 end)
 Hook()
@@ -896,6 +1041,38 @@ local function FrameName(frame)
     return tostring(frame.unit or "?")
 end
 
+local function Shown(v)   -- for the status lines; a secret is only named
+    if not CanAccess(v) then return "secret" end
+    return tostring(v)
+end
+
+-- What the form test sees on the unit.
+local function FormReport(unit)
+    local parts = {}
+    if IsMe(unit) then
+        if type(GetShapeshiftFormID) == "function" then
+            local _, form = pcall(GetShapeshiftFormID)
+            parts[#parts + 1] = "form " .. Shown(form)
+        end
+        local info = C_PlayerInfo
+        if info and info.GetDisplayID and info.GetNativeDisplayID then
+            local _, shown = pcall(info.GetDisplayID)
+            local _, native = pcall(info.GetNativeDisplayID)
+            parts[#parts + 1] = "display " .. Shown(shown) .. " (native " .. Shown(native) .. ")"
+        end
+    else
+        local _, _, class = pcall(UnitClass, unit)
+        parts[#parts + 1] = Shown(class)
+    end
+    local found = FormAuras(unit)
+    for i = 1, #found do found[i] = tostring(found[i]) end
+    parts[#parts + 1] = "form auras " .. (#found > 0 and table.concat(found, " ") or "none")
+        .. (FormAurasReadable() and "" or " (restricted)")
+    local form = InForm(unit)
+    parts[#parts + 1] = form == nil and "unknown" or form and "in a form" or "own form"
+    return table.concat(parts, ", ")
+end
+
 local function Status()
     Summary()
     local switches = {}
@@ -922,6 +1099,10 @@ local function Status()
             .. (cropped[frame.portrait] and "cropped" or "Blizzard") .. " (" .. tostring(kind and KINDS[kind].label or why) .. ")")
     end
     Print("  " .. idle .. " more frames without a unit")
+    Print("  your form: " .. FormReport("player"))
+    if Flag(UnitExists, "target") and not IsMe("target") and Flag(UnitIsPlayer, "target") then
+        Print("  target's form: " .. FormReport("target"))
+    end
     if lastError then Print("last error: " .. tostring(lastError)) end
 end
 

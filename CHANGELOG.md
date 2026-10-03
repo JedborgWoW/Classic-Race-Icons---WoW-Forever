@@ -2,6 +2,72 @@
 
 ## [Unreleased]
 
+## [1.0.1] — 2026-10-03
+
+Shapeshifted portraits are left alone.
+
+* **Druid forms** (Cat, Bear, Dire Bear, Travel, Aquatic, Moonkin and the later forms) and
+  the shaman's **Ghost Wolf** show the creature, not the race, so their portraits are now
+  left as Blizzard draws them instead of getting the race's framing, which made them
+  smaller. On you, on your target, focus, party and their targets.
+* A dead **night elf's wisp** is left alone too.
+* Stances, stealth and Shadowform keep your own model and are framed as before.
+* Other players in combat: the game hides their buffs from addons there, so the last form
+  seen for that player is used until combat ends, and every portrait is checked again then.
+* The calibration window says so when you are in a form; `/cri status` shows what the form
+  check sees on you and your target.
+
+The work that led up to it, newest first:
+
+### 2026-10-03 — the version is 1.0.1
+
+* The user: "Nu funkar det bra. Skriv changeloggen, publicera v 1.0.1 på Github samt gör ett
+  ZIP paket för curseforge". The TOC's `## Version` goes from 1.0.0 to 1.0.1; everything
+  under [Unreleased] became this release.
+
+### 2026-10-03 — Ghost Wolf found more ways; a night elf's wisp
+
+* The user: "Ghost form påverkas fortfarande". Which test missed it can't be seen offline,
+  so every way a form can slip through is closed, and `/cri status` now shows what the form
+  test sees ("your form: form 16, display … (native …), form auras 2645, in a form", the
+  same for a player target).
+* You: the animal forms (Blizzard's `ANIMAL_FORMS` IDs, Ghost Wolf 16) count by their form
+  ID alone, without the display check; another form still only when it changes your display
+  (not when the display is 0). A druid's or shaman's form the client doesn't report as a
+  form is found by its aura on you (only while aura data isn't restricted).
+* Everyone: a form aura is also looked for by its name in the client's language
+  (`C_Spell.GetSpellName`, `C_UnitAuras.GetAuraDataBySpellName(unit, name, "HELPFUL")`), for
+  one under another spell ID; the names are only kept once the client has them.
+* A dead night elf's ghost is a wisp (Wisp Spirit): `UnitIsGhost`, Blizzard's portrait,
+  reason "wisp". Other races' ghosts are their race and stay cropped.
+* Tests: 1322 checks; mutants all killed.
+
+### 2026-10-03 — druid forms and Ghost Wolf keep Blizzard's portrait
+
+* The user: "Druid former ska ignoreras av addonet. Nu när man har på addonet för tex Night
+  elf, och dom är i Cat Form, Travel Form eller Bear form så blir bilden "mindre"", then
+  "Samma sak gäller shaman ghost wolfs". A form's portrait shows the creature, and the
+  race's crop made it smaller; such a portrait is now left as Blizzard draws it.
+* You: Blizzard's own test (`ModelSceneUtil.SetUpCharacterSheetScene`) — a
+  `GetShapeshiftFormID()` form whose `C_PlayerInfo.GetDisplayID()` is not
+  `GetNativeDisplayID()`, so stances, stealth and Shadowform keep your own model and stay
+  cropped. Without `C_PlayerInfo`, the form's ID decides (Blizzard's `ANIMAL_FORMS`, which
+  Forever doesn't load).
+* Other players, druids and shamans only (`UnitClass`): the form's aura,
+  `C_UnitAuras.GetUnitAuraBySpellID` — Cat 768, Bear 5487, Dire Bear 9634, Travel 783,
+  Aquatic 1066, Moonkin 24858, Tree of Life 33891, Flight 33943, Swift Flight 40120, Ghost
+  Wolf 2645. While aura data is restricted (combat, encounters, challenge modes, PvP
+  matches) a missing aura says nothing, unless every form the client has is flagged never
+  secret (`C_Secrets.GetSpellAuraSecrecy`); then the last answer read for that player (by
+  GUID) stands, and one never read keeps Blizzard's portrait. No blocked-action popup: the
+  query just returns nothing.
+* `PLAYER_REGEN_ENABLED` now always crops every frame again (forms can be read again);
+  `UPDATE_SHAPESHIFT_FORM` checks your own once more.
+* The tuner says "In a form: change back to calibrate."; `/cri status` gives "shapeshifted"
+  or "form unknown" as the reason.
+* Tests: 1268 checks (forms for you and others, restricted auras, never-secret flags, the
+  tuner); mutants all killed.
+
 ## [1.0.0] — 2026-09-30
 
 The first release.

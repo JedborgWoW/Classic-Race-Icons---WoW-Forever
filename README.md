@@ -145,6 +145,9 @@ The line at the bottom of the window helps:
   portrait, so on a few races you may see a little black at the rim, where Forever's picture
   ends; ClassicUI Forever's ring covers that part.
 * NPCs are never touched — only players of the races above.
+* **Druid forms and Ghost Wolf** show the creature, not the race, so those portraits are
+  left as Blizzard draws them — and a dead night elf's wisp too. In combat the game hides
+  other players' buffs from addons, so a form they take mid-fight is seen when combat ends.
 * When the game hides a player's race or sex from addons, that portrait stays Forever's own.
 * Settings are stored in `ClassicRaceIconsDB` (SavedVariables), for the whole account.
 
