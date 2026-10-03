@@ -19,11 +19,6 @@ Shapeshifted portraits are left alone.
 
 The work that led up to it, newest first:
 
-### 2026-10-03 — the version is 1.0.1
-
-* The user: "Nu funkar det bra. Skriv changeloggen, publicera v 1.0.1 på Github samt gör ett
-  ZIP paket för curseforge". The TOC's `## Version` goes from 1.0.0 to 1.0.1; everything
-  under [Unreleased] became this release.
 
 ### 2026-10-03 — Ghost Wolf found more ways; a night elf's wisp
 
