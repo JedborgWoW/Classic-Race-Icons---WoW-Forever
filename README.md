@@ -47,6 +47,8 @@ Made by **Jedborg** (<https://github.com/JedborgWoW>).
   [ClassicUI Forever](https://github.com/wowaddonmaker/classicuiforever)** (by
   [justawower](https://github.com/wowaddonmaker)): Blizzard's own
   unit frames and ClassicUI Forever's 1.x frames alike, found by itself at login.
+* **Works with [Advanced Classic Interface](https://www.curseforge.com/wow/addons/advanced-classic-interface)**
+  (by Regentlord): its frames are framed too, and its class icon portraits are left alone.
 * **Safe in combat**: no "blocked from an action" popups, no taint — the addon never moves,
   hides or changes Blizzard's frames, it only picks which part of the portrait is shown.
 
@@ -149,8 +151,9 @@ The line at the bottom of the window helps:
 
 ## Good to know
 
-* **Forever's class icon portraits** (the Settings option, or RougeUI's *Class Portrait*)
-  win over this addon while they are on.
+* **Class icon portraits** (Forever's Settings option, RougeUI's *Class Portrait*, or
+  Advanced Classic Interface's *Use class icon portraits*) win over this addon while they
+  are on.
 * **Stock UI or ClassicUI Forever**: both work. The stock frames show the whole round
   portrait, so on a few races you may see a little black at the rim, where Forever's picture
   ends; ClassicUI Forever's ring covers that part.

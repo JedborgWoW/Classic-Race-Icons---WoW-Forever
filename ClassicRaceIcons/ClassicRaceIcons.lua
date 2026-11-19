@@ -117,9 +117,30 @@ local function IsMe(unit)
     return unit == "player" or (Flag(UnitIsUnit, unit, "player"))
 end
 
--- Forever's own class icon portraits (UnitFrame_ShouldReplacePortrait) are left alone.
+-- Advanced Classic Interface (Regentlord, a full UI for Forever) draws class icons on the
+-- players' portraits by default ("Use class icon portraits", per frame): its settings are read
+-- from its own AceAddon object, for a frame it handles (its portraitHandlers, by unit). Read
+-- only; a missing or changed ACI reads as no class icons.
+local ACI_SECTIONS = { player = "player", vehicle = "player", target = "target", targettarget = "target",
+    focus = "focus", focustarget = "focus" }
+local function AciClassIcons(unit)
+    if LibStub == nil then return false end
+    local ok, ace = pcall(LibStub, "AceAddon-3.0", true)
+    if not ok or type(ace) ~= "table" or type(ace.GetAddon) ~= "function" then return false end
+    local okAci, aci = pcall(ace.GetAddon, ace, "AdvancedClassicInterface", true)
+    if not okAci or type(aci) ~= "table" or type(aci.portraitHandlers) ~= "table" then return false end
+    if not aci.portraitHandlers[unit] then return false end
+    local section = ACI_SECTIONS[unit] or (unit:find("^party%d$") and "party")
+    local profile = type(aci.db) == "table" and type(aci.db.profile) == "table" and aci.db.profile
+    local cfg = profile and section and profile[section]
+    return type(cfg) == "table" and cfg.classPortraits == true
+end
+
+-- Forever's own class icon portraits (UnitFrame_ShouldReplacePortrait) are left alone, and
+-- Advanced Classic Interface's.
 local CLASS_ICON = "class icon"
 local function ClassIconShown(unit, me)
+    if AciClassIcons(unit) then return true end
     if not CVarOn(me and "ReplaceMyPlayerPortrait" or "ReplaceOtherPlayerPortraits") then
         return false
     end
@@ -710,6 +731,18 @@ local function Hook()
     hooked = true
 end
 
+-- Hooks run in the order they were made. Advanced Classic Interface hooks the same function
+-- when it is enabled at login and then draws the portrait again, whole (SetPortraitTexture,
+-- texcoords 0-1), so the crop was gone after every reload until /cri on (a CurseForge comment,
+-- 2026-11-19). A second hook, made once the login's addons have all hooked (the frame after
+-- PLAYER_LOGIN), crops after them; then every frame is cropped again.
+local lateHooked = false
+local function HookLate()
+    if lateHooked or not hooked then return end
+    hooksecurefunc("UnitFramePortrait_Update", function(frame) OnPortraitUpdate(frame, true) end)
+    lateHooked = true
+end
+
 local function AddKnownFrames()
     local list = { PlayerFrame, TargetFrame, FocusFrame }
     if TargetFrame then list[#list + 1] = TargetFrame.totFrame end
@@ -1248,6 +1281,10 @@ events:SetScript("OnEvent", function(_, event, arg1)
         visible = ClassicUIRing() and CLASSICUI_OPENING or 0.5
         AddKnownFrames()
         Refresh()
+        C_Timer.After(0, function()
+            HookLate()
+            Refresh()
+        end)
     elseif event == "CVAR_UPDATE" then
         if type(arg1) == "string" and CLASS_CVARS[arg1:lower()] then QueueRefresh() end
     elseif event == "PLAYER_REGEN_ENABLED" then

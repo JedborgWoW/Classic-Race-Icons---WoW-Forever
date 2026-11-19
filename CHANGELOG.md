@@ -12,6 +12,27 @@ NPCs get the Classic framing too, and Aquatic Form gets the Classic portrait.
   shows the whole animal small in the middle of the circle. For you and for other druids in
   the form; off with *Classic Aquatic Form* in the options or `/cri aquatic`.
 * `/cri models` says how many models are built in.
+* **Works with Advanced Classic Interface**: the portraits stay framed after a reload or
+  relog (no more `/cri on` needed), and its class icon portraits are left alone.
+
+### 2026-11-19 — works with Advanced Classic Interface
+
+* A CurseForge comment: with Advanced Classic Interface (Regentlord, a full UI for Forever)
+  the portraits were framed after `/cri on`, but no longer after a reload or relog. Root
+  cause, in ACI 2.7.3's Core.lua: it hooks `UnitFramePortrait_Update` too, when it is enabled
+  at login (after our hook, made at load), and then draws the portrait again, whole
+  (`Utils.DefaultPortrait`: `SetPortraitTexture` + `SetTexCoord(0, 1, 0, 1)`). Hooks run in the
+  order they were made, so ours cropped and ACI undid it at every redraw; `/cri on` crops
+  without a redraw, so it held until the next one.
+* A second hook is made the frame after `PLAYER_LOGIN`, once the login's addons have hooked,
+  and crops after them; every frame is then cropped again.
+* ACI's class icon portraits ("Use class icon portraits", on by default, per frame) are left
+  alone like Forever's own: read from ACI's AceAddon object (its `portraitHandlers` and
+  `db.profile.<player|target|focus|party>.classPortraits`), only for the frames ACI handles
+  and only for players, as ACI does. Class icons win over the Aquatic Form picture too.
+* Tests: 1623 checks (an ACI stand-in hooking at login: cropped after it, its class icons left
+  alone, NPCs still cropped, a module of ACI's off); mutants killed (no late hook, ACI's
+  class icons ignored, its setting ignored, no handler check).
 
 ### 2026-11-19 — Aquatic Form shows the Classic portrait; /cri models in one line
 
