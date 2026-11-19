@@ -12,7 +12,8 @@
 -- client's round picture, which has nothing beyond its edge: zooming out is possible only as
 -- far as a ring hides that edge (ClassicUI's frames), never on a frame showing the whole circle.
 --
--- Rules kept: only SetTexCoord on the portrait texture (not protected, fine in combat);
+-- Rules kept: only SetTexCoord on the portrait texture (not protected, fine in combat), and
+-- SetTexture for the Aquatic Form picture (and SetPortraitTexture to give the client's back);
 -- nothing is moved or resized; no field is written on a Blizzard object; no Blizzard Lua
 -- function is called; race and sex are checked with canaccessvalue before they are used,
 -- and a secret one leaves Blizzard's portrait as it is.
@@ -83,13 +84,13 @@ end
 
 -- Settings. kinds: each race and sex on or off; frames: the unit frames cropped, by kind of
 -- frame (FrameGroup); overlay: the tuner's fader.
-local DEFAULTS = { enabled = true, others = true, overlay = 0.5, shrink = true,
+local DEFAULTS = { enabled = true, others = true, npcs = true, aquatic = true, overlay = 0.5, shrink = true,
     frames = { player = true, target = true, focus = true, party = true } }
 local ALL_KINDS_ON = {}
 for kind in pairs(KINDS) do ALL_KINDS_ON[kind] = true end
-local db = { enabled = true, others = true, overlay = DEFAULTS.overlay, shrink = DEFAULTS.shrink,
+local db = { enabled = true, others = true, npcs = true, aquatic = true, overlay = DEFAULTS.overlay, shrink = DEFAULTS.shrink,
     kinds = ALL_KINDS_ON, frames = DEFAULTS.frames,
-    crops = {} }   -- until ADDON_LOADED
+    crops = {}, models = {} }   -- until ADDON_LOADED
 
 -- How much of the portrait the frame shows, as a radius in picture widths. ClassicUI's ring
 -- opening is 27.4 of its 64 px portrait; Blizzard's own frames may show the whole circle.
@@ -262,12 +263,195 @@ local function InForm(unit)
     return nil
 end
 
+-- NPCs have no race (UnitRace gives nil), but one shaped like a race uses that race's model
+-- file, the same as its players (the user, 2026-11-17: a human male NPC and player both
+-- 119940, female 119563). A model frame of our own, never drawn, is set to the unit and its
+-- model file read. Each player seen counts a vote for their race and sex's file, so an NPC
+-- with that file is framed as that race and sex; a creature, a form or a mount has another
+-- file and keeps Blizzard's portrait. The model is read at once, or a frame or two later:
+-- until then, and for a unit whose GUID can't be read, Blizzard's portrait.
+-- Every race's model files, from the community listfile (wowdev/wow-listfile, 2026-11-17):
+-- character/<race>/<sex>/<race><sex>.m2 (the SD models; human male 119940 and female 119563
+-- seen in game), _hd and _hd_sdr (HD models), and the orc male's upright ones. Blood elves
+-- are Forever's Skyborne, who also have models of their own (7478487 male, 7478494 female:
+-- not in the listfile, seen on the players by the user's /cri models, 2026-11-19).
+local DEFAULT_MODELS = {}
+for kind, files in pairs({
+    Human2 = { 119940, 1011653, 1838385 },            Human3 = { 119563, 1000764, 1838572, 1842700 },
+    Dwarf2 = { 118355, 878772, 1838560 },             Dwarf3 = { 118135, 950080, 1838562 },
+    NightElf2 = { 120791, 974343, 1838576 },          NightElf3 = { 120590, 921844, 1838574 },
+    Gnome2 = { 119159, 900914, 1838566 },             Gnome3 = { 119063, 940356, 1838564 },
+    Orc2 = { 121287, 917116, 1838578, 1968587, 1968838 }, Orc3 = { 121087, 949470, 1838580 },
+    Scourge2 = { 121768, 959310, 1838584 },           Scourge3 = { 121608, 997378, 1838582 },
+    Tauren2 = { 122055, 968705, 1838586 },            Tauren3 = { 121961, 986648, 1839008 },
+    Troll2 = { 122560, 1022938, 1838590 },            Troll3 = { 122414, 1018060, 1838588 },
+    Skyborne2 = { 117170, 1100087, 1853408, 7478487 }, Skyborne3 = { 116921, 1100258, 1839709, 7478494 },
+}) do
+    for _, file in ipairs(files) do DEFAULT_MODELS[file] = kind end
+end
+local DEFAULT_WEIGHT = 3   -- votes a default counts as, against a player in a costume
+local MAX_VOTES = 50
+local PROBE_TRIES, MAX_QUEUE = 120, 20   -- tries a frame apart: about two seconds
+-- Two model frames of our own (no parent, no size: never drawn), each looking at one unit at
+-- a time: the NPCs on show never wait behind the players being learned from (the user,
+-- 2026-11-17: the NPC's portrait moved into place a moment after targeting).
+local function Prober()
+    return { frame = CreateFrame("PlayerModel"), queue = {}, pending = {} }
+end
+local voteProber, npcProber = Prober(), Prober()
+local npcModels, npcCount = {}, 0   -- an NPC's GUID -> its model file (false: none)
+local voted = {}                    -- a player's GUID -> counted this session
+local ModelsChanged = function() end   -- crops again; set once Refresh exists
+
+local function GuidOf(unit)
+    local ok, guid = pcall(UnitGUID, unit)
+    if ok and CanAccess(guid) and type(guid) == "string" then return guid end
+end
+
+-- The race and sex a model file belongs to: the players' votes, a default counting extra.
+local function ModelKind(file)
+    local votes = type(db.models[file]) == "table" and db.models[file] or {}
+    local best, most = nil, 0
+    for kind in pairs(KINDS) do
+        local n = (votes[kind] or 0) + (DEFAULT_MODELS[file] == kind and DEFAULT_WEIGHT or 0)
+        if n > most then best, most = kind, n end
+    end
+    return best
+end
+
+-- Set the frame to the unit and read its model file: at once (a unit on show has its model
+-- loaded), else each frame until it has loaded. done(file, late) gets the file, false when
+-- none came, or nil when the token moved to another unit meanwhile; late when it came later.
+local function NextProbe(p)
+    local job = table.remove(p.queue, 1)
+    p.job = job
+    if not job then return end
+    pcall(p.frame.ClearModel, p.frame)   -- not the last unit's file while this one loads
+    local set = pcall(p.frame.SetUnit, p.frame, job.unit)
+    local tries = 0
+    local function Check(late)
+        if p.job ~= job then return end
+        local file
+        if GuidOf(job.unit) ~= job.guid then
+            file = nil
+        elseif not set then
+            file = false
+        else
+            local ok, id = pcall(p.frame.GetModelFileID, p.frame)
+            if ok and CanAccess(id) and type(id) == "number" and id > 0 then
+                file = id
+            else
+                tries = tries + 1
+                if tries < PROBE_TRIES then
+                    C_Timer.After(0, function() Check(true) end)
+                    return
+                end
+                file = false
+            end
+        end
+        p.pending[job.guid] = nil
+        job.done(file, late)
+        NextProbe(p)
+    end
+    Check(false)
+end
+
+local function Probe(p, unit, guid, done)
+    if p.pending[guid] or #p.queue >= MAX_QUEUE then return end
+    p.pending[guid] = true
+    p.queue[#p.queue + 1] = { unit = unit, guid = guid, done = done }
+    if not p.job then NextProbe(p) end
+end
+
+-- A player of a known race and sex, in their own form: a vote for their model file.
+local function Learn(unit, kind)
+    local guid = GuidOf(unit)
+    if not guid or voted[guid] then return end
+    voted[guid] = true
+    Probe(voteProber, unit, guid, function(file)
+        if file == nil then voted[guid] = nil return end   -- another unit by then: later
+        if not file then return end
+        local votes = db.models[file] or {}
+        db.models[file] = votes
+        local before = ModelKind(file)
+        votes[kind] = math.min(MAX_VOTES, (votes[kind] or 0) + 1)
+        if ModelKind(file) ~= before then ModelsChanged() end
+    end)
+end
+
+-- An NPC's kind from its model file; nil and why when there is none (yet).
+local function NpcKind(unit)
+    local guid = GuidOf(unit)
+    if not guid then return nil, "secret" end
+    local file = npcModels[guid]
+    if file == nil then
+        Probe(npcProber, unit, guid, function(found, late)
+            if found == nil then return end
+            if npcCount >= 500 then npcModels, npcCount = {}, 0 end
+            npcModels[guid] = found
+            npcCount = npcCount + 1
+            if late and found and ModelKind(found) then ModelsChanged() end
+        end)
+        file = npcModels[guid]   -- read at once: framed on this very drawing
+        if file == nil then return nil, "model not read yet" end
+    end
+    local kind = file and ModelKind(file)
+    if not kind then return nil, "not a race's model" end
+    return kind
+end
+
+-- Aquatic Form: Forever's portrait shows the whole sea lion, small (the user, 2026-11-19),
+-- and zooming in on its head is far too coarse. The old client's portrait is shown instead:
+-- Media\Aquatic.tga, Classic Era's own portrait of the form (display 2428, the same for night
+-- elves and tauren, drawn through the model's portrait camera), sharpened by the user and cut
+-- round by tools\cut_aquatic.ps1 (tools\render_aquatic.ps1 renders it from the 3.3.5a files).
+-- Yours: form 4 or the form's aura; another druid's: the aura, else the last answer read.
+local AQUATIC_PICTURE = "Interface\\AddOns\\" .. ADDON .. "\\Media\\Aquatic.tga"
+local AQUATIC_FORM, AQUATIC_AURA = 4, 1066
+local aquaticName
+
+-- Aquatic Form's aura on the unit: true, false, or nil when it can't be read.
+local function AquaticAura(unit)
+    local get = C_Spell and C_Spell.GetSpellName
+    if not aquaticName and type(get) == "function" then
+        local ok, name = pcall(get, AQUATIC_AURA)
+        if ok and CanAccess(name) and type(name) == "string" and name ~= "" then aquaticName = name end
+    end
+    local found = FormAuras(unit)
+    for _, v in ipairs(found) do
+        if v == AQUATIC_AURA or (aquaticName and v == aquaticName) then return true end
+    end
+    if #found > 0 or FormAurasReadable() then return false end
+    return nil
+end
+
+local aquaticSeen = {}   -- another druid's GUID -> in Aquatic Form when last read
+local function InAquatic(unit)
+    if IsMe(unit) then
+        if type(GetShapeshiftFormID) == "function" then
+            local ok, form = pcall(GetShapeshiftFormID)
+            if ok and CanAccess(form) and form == AQUATIC_FORM then return true end
+        end
+        return AquaticAura("player") == true
+    end
+    local ok, _, class = pcall(UnitClass, unit)
+    if not ok or not CanAccess(class) or class ~= "DRUID" then return false end
+    local guid = GuidOf(unit)
+    local aquatic = AquaticAura(unit)
+    if aquatic ~= nil then
+        if guid then aquaticSeen[guid] = aquatic end
+        return aquatic
+    end
+    return guid ~= nil and aquaticSeen[guid] == true
+end
+
 -- The unit's kind ("Scourge2"), whatever the settings; nil and why when there is none.
+local NOT_A_PLAYER = "not a player"
 local function KindOf(unit)
     if type(unit) ~= "string" then return nil, "no unit" end
     local isPlayer, unknown = Flag(UnitIsPlayer, unit)
     if unknown then return nil, "secret" end
-    if not isPlayer then return nil, "not a player" end
+    if not isPlayer then return nil, NOT_A_PLAYER end
     local ok, _, race = pcall(UnitRace, unit)
     if not ok or not CanAccess(race) then return nil, "secret" end
     local okSex, sex = pcall(UnitSex, unit)
@@ -281,6 +465,15 @@ end
 local function KindFor(unit)
     if not db.enabled then return nil, "off" end
     local kind, why = KindOf(unit)
+    if why == NOT_A_PLAYER then
+        if not db.npcs then return nil, "NPCs off" end
+        if not db.others then return nil, "others off" end
+        kind, why = NpcKind(unit)
+        if not kind then return nil, why end
+        if not db.kinds[kind] then return nil, KINDS[kind].label .. " off" end
+        if not (db.crops[kind] or DEFAULT_CROPS[kind]) then return nil, KINDS[kind].label .. " not cropped" end
+        return kind, KINDS[kind].label .. " NPC"
+    end
     if not kind then return nil, why end
     if not db.kinds[kind] then return nil, KINDS[kind].label .. " off" end
     local me = IsMe(unit)
@@ -290,6 +483,7 @@ local function KindFor(unit)
     if form ~= false then return nil, form and "shapeshifted" or "form unknown" end
     -- A dead night elf's ghost is a wisp (Wisp Spirit).
     if KINDS[kind].race == "NightElf" and Flag(UnitIsGhost, unit) then return nil, "wisp" end
+    if db.npcs then Learn(unit, kind) end
     if not (db.crops[kind] or DEFAULT_CROPS[kind]) then return nil, KINDS[kind].label .. " not cropped" end
     return kind, KINDS[kind].label
 end
@@ -312,6 +506,22 @@ local function KindForFrame(frame)
     local group = FrameGroup(frame)
     if group and not db.frames[group] then return nil, group .. " portraits off" end
     return kind, why
+end
+
+-- Whether the frame shows the Classic Aquatic Form picture: a player in the form, under
+-- the same switches as a crop (but the race's).
+local function AquaticForFrame(frame)
+    if not (db.enabled and db.aquatic) then return false end
+    local unit = frame.unit
+    if type(unit) ~= "string" then return false end
+    local isPlayer, unknown = Flag(UnitIsPlayer, unit)
+    if unknown or not isPlayer then return false end
+    local me = IsMe(unit)
+    if not me and not db.others then return false end
+    local group = FrameGroup(frame)
+    if group and not db.frames[group] then return false end
+    if ClassIconShown(unit, me) then return false end
+    return InAquatic(unit)
 end
 
 -- The frame's opening; ClassicUI's target-of-target ring shows more (17 of 35 px).
@@ -450,10 +660,29 @@ local function Cover(frame, wanted, zoom, x, y, opening)
     cover.tex:SetAlpha(wanted and 1 or 0)
 end
 
-local function Apply(frame)
+local AQUATIC_SHOWN = "Classic Aquatic Form"
+local swapped = setmetatable({}, { __mode = "k" })   -- portrait texture showing Aquatic.tga
+
+-- redrawn: Blizzard has just drawn the client's picture (the hook), not a refresh of ours.
+local function Apply(frame, redrawn)
     local portrait = frame.portrait
     if not portrait then return end
     frames[frame] = true
+    if redrawn then swapped[portrait] = nil end
+    if AquaticForFrame(frame) then
+        portrait:SetTexture(AQUATIC_PICTURE)   -- every time: Blizzard may have drawn it over
+        portrait:SetTexCoord(0, 1, 0, 1)
+        swapped[portrait] = true
+        cropped[portrait] = nil
+        Cover(frame, false)
+        return
+    end
+    if swapped[portrait] then
+        -- Our picture without Blizzard drawing again since (a switch turned off): the
+        -- client's picture back, as Blizzard draws it.
+        swapped[portrait] = nil
+        SetPortraitTexture(portrait, frame.unit)
+    end
     local kind, why = KindForFrame(frame)
     if kind then
         local opening = OpeningOf(frame)
@@ -469,15 +698,15 @@ local function Apply(frame)
     end
 end
 
-local function OnPortraitUpdate(frame)
-    local ok, err = pcall(Apply, frame)
+local function OnPortraitUpdate(frame, redrawn)
+    local ok, err = pcall(Apply, frame, redrawn)
     if not ok then lastError = err end
 end
 
 local hooked = false
 local function Hook()
     if hooked or type(UnitFramePortrait_Update) ~= "function" then return end
-    hooksecurefunc("UnitFramePortrait_Update", OnPortraitUpdate)
+    hooksecurefunc("UnitFramePortrait_Update", function(frame) OnPortraitUpdate(frame, true) end)
     hooked = true
 end
 
@@ -510,6 +739,7 @@ local function QueueRefresh()
         Refresh()
     end)
 end
+ModelsChanged = QueueRefresh
 
 local function ClassicUIRing()
     local api = ClassicUIForeverAPI
@@ -522,6 +752,20 @@ local function LoadSettings()
     local saved = type(ClassicRaceIconsDB) == "table" and ClassicRaceIconsDB or {}
     if saved.enabled == nil then saved.enabled = DEFAULTS.enabled end
     if saved.others == nil then saved.others = DEFAULTS.others end
+    if type(saved.npcs) ~= "boolean" then saved.npcs = DEFAULTS.npcs end
+    if type(saved.aquatic) ~= "boolean" then saved.aquatic = DEFAULTS.aquatic end
+    -- The players' votes: model file -> { kind -> count }.
+    if type(saved.models) ~= "table" then saved.models = {} end
+    for file, votes in pairs(saved.models) do
+        if type(file) ~= "number" or type(votes) ~= "table" then
+            saved.models[file] = nil
+        else
+            for kind, n in pairs(votes) do
+                if not KINDS[kind] or type(n) ~= "number" or n < 1 then votes[kind] = nil end
+            end
+            if next(votes) == nil then saved.models[file] = nil end
+        end
+    end
     if type(saved.shrink) ~= "boolean" then saved.shrink = DEFAULTS.shrink end
     if type(saved.overlay) ~= "number" or not (saved.overlay >= 0 and saved.overlay <= 1) then
         saved.overlay = DEFAULTS.overlay
@@ -858,7 +1102,7 @@ local function ResetAll()
 end
 
 local function CreateOptions()
-    local f = NewWindow("ClassicRaceIconsOptions", 300, 572)
+    local f = NewWindow("ClassicRaceIconsOptions", 300, 620)
     f:ClearAllPoints()
     f:SetPoint("RIGHT", UIParent, "CENTER", -200, 0)   -- left of the tuner (380 px, centred)
     f.title:SetText("Classic Race Icons")
@@ -899,6 +1143,10 @@ local function CreateOptions()
             function(v) db.frames[group] = v end)
         y = y - 24
     end
+    f.npcs = Check(16, "NPC Portraits", function() return db.npcs end, function(v) db.npcs = v end)
+    y = y - 24
+    f.aquatic = Check(16, "Classic Aquatic Form", function() return db.aquatic end, function(v) db.aquatic = v end)
+    y = y - 24
 
     y = y - 8
     Heading("Race Overrides")
@@ -1032,7 +1280,15 @@ end
 
 local function Summary()
     Print("portraits " .. OnOff(db.enabled) .. ", " .. RaceSwitches() .. ", other players " .. OnOff(db.others)
-        .. ", past the edge " .. OnOff(db.shrink))
+        .. ", NPCs " .. OnOff(db.npcs) .. ", Aquatic Form " .. OnOff(db.aquatic) .. ", past the edge " .. OnOff(db.shrink))
+end
+
+-- How many model files are built in; the players' votes stay quiet (the user, 2026-11-19:
+-- only the first line).
+local function Models()
+    local builtIn = 0
+    for _ in pairs(DEFAULT_MODELS) do builtIn = builtIn + 1 end
+    Print("NPC models: " .. builtIn .. " built in (every race and sex, SD and HD) - NPCs need nothing more.")
 end
 
 local function FrameName(frame)
@@ -1095,8 +1351,12 @@ local function Status()
     table.sort(list, function(a, b) return FrameName(a) < FrameName(b) end)
     for _, frame in ipairs(list) do
         local kind, why = KindForFrame(frame)
-        Print("  " .. FrameName(frame) .. " [" .. frame.unit .. "]: "
-            .. (cropped[frame.portrait] and "cropped" or "Blizzard") .. " (" .. tostring(kind and KINDS[kind].label or why) .. ")")
+        if swapped[frame.portrait] then
+            Print("  " .. FrameName(frame) .. " [" .. frame.unit .. "]: " .. AQUATIC_SHOWN)
+        else
+            Print("  " .. FrameName(frame) .. " [" .. frame.unit .. "]: "
+                .. (cropped[frame.portrait] and "cropped" or "Blizzard") .. " (" .. tostring(why) .. ")")
+        end
     end
     Print("  " .. idle .. " more frames without a unit")
     Print("  your form: " .. FormReport("player"))
@@ -1121,6 +1381,13 @@ SlashCmdList.CLASSICRACEICONS = function(msg)
         db.shrink = not db.shrink
     elseif cmd == "others" then
         db.others = not db.others
+    elseif cmd == "npcs" then
+        db.npcs = not db.npcs
+    elseif cmd == "aquatic" then
+        db.aquatic = not db.aquatic
+    elseif cmd == "models" then
+        Models()
+        return
     elseif cmd == "tune" then
         OpenTuner()
         return
@@ -1140,6 +1407,8 @@ SlashCmdList.CLASSICRACEICONS = function(msg)
         Print("/cri on | off - cropping " .. OnOff(db.enabled))
         Print("/cri human | dwarf | nightelf | gnome | orc | undead | tauren | troll | skyborne - toggle one race")
         Print("/cri others - other players too, or only you (" .. OnOff(db.others) .. ")")
+        Print("/cri npcs - NPCs shaped like the races too (" .. OnOff(db.npcs) .. "); /cri models - how many models are built in")
+        Print("/cri aquatic - druids in Aquatic Form get the Classic portrait (" .. OnOff(db.aquatic) .. ")")
         Print("/cri shrink - a portrait may go smaller or further than the client's picture, black around it (" .. OnOff(db.shrink) .. ")")
         Print("/cri reset - all crops back to the defaults")
         Print("/cri status - what each unit frame shows")

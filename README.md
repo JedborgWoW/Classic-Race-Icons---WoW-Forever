@@ -29,8 +29,13 @@ Made by **Jedborg** (<https://github.com/JedborgWoW>).
 * **Orc male is limited**: Forever's orc male sits in a different position in its portrait
   than the Classic one, so it can't be framed exactly like Classic — it is tuned as close
   as the picture allows.
-* **Your real portrait**: nothing is swapped for a picture. Every player's live portrait is
-  shown, only framed differently, so gear, hair and faces are their own.
+* **Your real portrait**: every player's live portrait is shown, only framed differently,
+  so gear, hair and faces are their own.
+* **NPCs too**: NPCs shaped like one of the races (guards, innkeepers, grunts, …) are framed
+  like that race's players, from the moment you target them.
+* **Classic Aquatic Form**: Forever shows the whole sea lion, small, in the middle of the
+  circle; a druid in Aquatic Form gets the Classic portrait of it instead — you and every
+  druid you see.
 * **Every portrait frame**: player, target, target of target, focus, focus target and
   party frames.
 * **Options window** (`/cri options`) to switch frames, races and sexes on or off.
@@ -50,7 +55,7 @@ Made by **Jedborg** (<https://github.com/JedborgWoW>).
 1. Download the addon (*Code → Download ZIP*, or a release).
 2. Copy the **`ClassicRaceIcons`** folder (the one with `ClassicRaceIcons.toc` inside) to
    your WoW Forever `Interface\AddOns\` folder, e.g.
-   `World of Warcraft\_classic_beta_\Interface\AddOns\ClassicRaceIcons`.
+   `World of Warcraft\_forever_\Interface\AddOns\ClassicRaceIcons`.
    The folder must be called exactly `ClassicRaceIcons` — not `…-main`.
 3. Start the game and make sure *Classic Race Icons* is enabled in the AddOns list on the
    character screen.
@@ -68,6 +73,8 @@ Type **`/cri options`** to open the options window.
 * *Enable addon* — everything on or off.
 * *Player / Target / Focus / Party Frames Portrait* — which frames are re-framed. The
   target of target goes with *Target*, the focus's target with *Focus*.
+* *NPC Portraits* — NPCs shaped like one of the races are framed like its players (on).
+* *Classic Aquatic Form* — druids in Aquatic Form get the Classic portrait (on).
 
 **Race Overrides**
 
@@ -131,6 +138,9 @@ The line at the bottom of the window helps:
 | `/cri on` / `/cri off` | Turn the addon on or off |
 | `/cri human`, `dwarf`, `nightelf`, `gnome`, `orc`, `undead`, `tauren`, `troll`, `skyborne` | Turn one race on or off (both sexes) |
 | `/cri others` | Re-frame everyone, or only your own portrait |
+| `/cri npcs` | NPCs shaped like the races on or off (on by default) |
+| `/cri aquatic` | The Classic Aquatic Form portrait on or off (on by default) |
+| `/cri models` | How many race models the addon knows NPCs by |
 | `/cri shrink` | Allow portraits smaller than or beyond Forever's picture, with black around them (on by default) |
 | `/cri reset` | Every race and sex back to the defaults |
 | `/cri status` | What each frame shows, and every race and sex's framing |
@@ -144,10 +154,12 @@ The line at the bottom of the window helps:
 * **Stock UI or ClassicUI Forever**: both work. The stock frames show the whole round
   portrait, so on a few races you may see a little black at the rim, where Forever's picture
   ends; ClassicUI Forever's ring covers that part.
-* NPCs are never touched — only players of the races above.
+* **NPCs** have no race in the game; the addon knows them by their model, which is the
+  same as the race's players'. Creatures, mounts and other shapes keep Forever's portrait.
 * **Druid forms and Ghost Wolf** show the creature, not the race, so those portraits are
-  left as Blizzard draws them — and a dead night elf's wisp too. In combat the game hides
-  other players' buffs from addons, so a form they take mid-fight is seen when combat ends.
+  left as Blizzard draws them — and a dead night elf's wisp too — except **Aquatic Form**,
+  which gets the Classic portrait. In combat the game hides other players' buffs from
+  addons, so a form they take mid-fight is seen when combat ends.
 * When the game hides a player's race or sex from addons, that portrait stays Forever's own.
 * Settings are stored in `ClassicRaceIconsDB` (SavedVariables), for the whole account.
 
@@ -169,7 +181,10 @@ For the curious:
 
 * One `hooksecurefunc` on `UnitFramePortrait_Update`, the function every Blizzard unit frame
   redraws its portrait through. After it, the portrait gets `SetTexCoord` — a texture call,
-  not protected, fine in combat.
+  not protected, fine in combat. In Aquatic Form it gets `SetTexture` with the Classic
+  picture instead.
+* NPCs: a model frame of the addon's own, never shown, is set to the unit and its model
+  file read; a race's model file means that race's framing.
 * Nothing of Blizzard's is moved, resized, shown or hidden; no field is written on a
   Blizzard object and no Blizzard Lua function is called.
 * The black (`Media/Outside.tga`) is the addon's own texture, laid over the portrait with
@@ -187,6 +202,8 @@ For the curious:
     calibration window's *Classic* picture.
   * `Media/Outside.tga` — the black laid around a portrait that goes past Forever's
     picture.
+  * `Media/Aquatic.tga` — the Classic portrait of Aquatic Form (Blizzard Entertainment's
+    art, from Classic Era's portrait of the form).
 * `Pictures/` — the screenshots on this page.
 * `CHANGELOG.md` — every change, dated.
 * `LICENSE` — the licence.

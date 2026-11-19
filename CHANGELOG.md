@@ -1,5 +1,96 @@
 # Changelog
 
+## [1.0.2] — 2026-11-19
+
+NPCs get the Classic framing too, and Aquatic Form gets the Classic portrait.
+
+* **NPCs** shaped like one of the races (human guards, dwarf innkeepers, orc grunts, …) are
+  framed like that race's players, from the moment you target them. Every race and sex is
+  built in, including Forever's own Skyborne models. Turn it off with *NPC Portraits* in the
+  options or `/cri npcs`.
+* **Aquatic Form** shows the Classic portrait of the sea lion instead of Forever's, which
+  shows the whole animal small in the middle of the circle. For you and for other druids in
+  the form; off with *Classic Aquatic Form* in the options or `/cri aquatic`.
+* `/cri models` says how many models are built in.
+
+### 2026-11-19 — Aquatic Form shows the Classic portrait; /cri models in one line
+
+* The user: "Skulle vi kunna byta ut porträttet för Aqua form? Så den ser ut som i classic".
+  Forever's portrait of the form (display 2428, the sea lion, as in Classic) shows the whole
+  animal, small, in the middle of the circle; Classic's portrait camera shows its head. A crop
+  of Forever's picture zoomed 3x on the head was far too coarse in game.
+* So the Classic portrait is shown instead: `Media\Aquatic.tga` (256 px, round), from Classic
+  Era's own portrait of display 2428 (`SetPortraitTextureFromCreatureDisplayID`, the user's
+  screenshot), sharpened by the user, cut round with the navy behind the seal made black like
+  Forever's portraits (`tools\cut_aquatic.ps1`). `tools\render_aquatic.ps1` +
+  `tools\M2Portrait.cs` render the same portrait from the 3.3.5a client's model through its
+  own portrait camera (checked against Classic Era's: the same framing), should it be needed.
+* Shown for you in the form (form 4, or the form's aura) and for other druids in it (aura
+  1066, or by its name; while aura data is restricted the last answer read for them), on the
+  frames the switches allow; class icons win. Out of the form Blizzard's portrait comes back;
+  turning it off brings the client's portrait back at once (`SetPortraitTexture`).
+* Options: *Classic Aquatic Form* under General (on); `/cri aquatic` toggles it; `/cri status`
+  names a frame showing it.
+* `/cri models` prints only how many models are built in (the user: just the first line).
+* Forever's Skyborne have models of their own, not in the listfile: 7478487 male, 7478494
+  female (the user's `/cri models` showed them confirmed on 2 and 5 players). Built in now, so
+  Skyborne NPCs are framed without any player seen first (59 built in).
+* Tests: 1592 checks; mutants killed (no restore, no reset on Blizzard's redraw, wrong form
+  ID, no last answer, no name lookup, any class, no class-icon check, the picture set once).
+
+### 2026-11-17 — NPCs framed at once, not moved into place
+
+* The user: "Det fungerar. Men porträttet "rör sig" till det kalibrerade läget när man
+  targettar en NPC". Root cause: the NPC's model file was first read 0.1 s after `SetUnit`,
+  and its look waited in one queue behind the players being learned from (each 0.1 s or
+  more), so Blizzard's portrait showed first and the crop came after.
+* The model file is now read at once after `SetUnit` (a unit on show has its model loaded),
+  so the NPC is framed on its first drawing; if it hasn't loaded, again each frame (at most
+  120 frames) instead of every 0.1 s.
+* NPCs and players being learned from each have their own model frame and queue: an NPC
+  never waits behind a vote.
+* Tests: 1537 checks (a loaded model framed on the first drawing, an NPC read while votes
+  are under way, two model frames); the shared queue and the delayed first read are both
+  caught.
+
+### 2026-11-17 — NPCs shaped like the races are framed too
+
+* The user: "Går det att göra så att NPCer har samma position som spelare har?". NPCs have
+  no race: in game `UnitRace` gave nil on a human NPC (not secret), `UnitSex` gave 3. But a
+  model frame set to the unit tells its model file, and the user's tests showed an NPC and a
+  player of the same race and sex share it (human male NPC and player 119940, female NPC and
+  player 119563).
+* A `PlayerModel` of the addon's own (no parent, never drawn) is set to the unit
+  (`ClearModel`, `SetUnit`) and its `GetModelFileID` read once loaded (every 0.1 s, at most
+  2 s), one unit at a time; an answer for a token that moved to another unit (GUID) is
+  dropped and asked again later.
+* Players teach it: each player of a known race and sex in their own form (not shapeshifted,
+  not a wisp) counts one vote, once a session, for their model file (`ClassicRaceIconsDB.models`,
+  file -> kind -> votes). Human male 119940 and female 119563 are defaults worth 3 votes, so
+  a player in a costume doesn't turn them.
+* An NPC whose model file belongs to a race and sex is framed like that race and sex (the
+  same crop, the race switches apply); a creature, a mount or a form has another file and
+  keeps Blizzard's portrait, as does an NPC until its model has loaded (a moment, then the
+  frames are cropped again) and one whose GUID can't be read. NPCs' files are kept by GUID
+  for the session (up to 500).
+* Options: *NPC Portraits* under General (on); `/cri npcs` toggles it, *Other players* off
+  leaves NPCs out too. `/cri models` lists the model files known per race and sex;
+  `/cri status` gives "Human Male NPC", "model not read yet" or "not a race's model".
+* Tests: 1442 checks (the probe's loading, a moved token, secret files and GUIDs, learning,
+  costumes, the switches, saved votes checked at load, combat); mutants killed but one that
+  can't matter (every kind has a default crop).
+* Seen in game: works on a human male NPC (Velarok Windblade); a dwarf lookout stayed
+  Blizzard's, his file not yet learned. The user: "Kan vi fixa för alla raser?" — every race
+  and sex's model files are now built in, from the community listfile (wowdev/wow-listfile;
+  its human files are exactly the 119940 / 119563 seen in game): the SD files
+  (`character/<race>/<sex>/<race><sex>.m2`), the HD ones (`_hd`, `_hd_sdr`, human female
+  `_sdr`) and the orc male's upright ones, 57 in all; blood elves are the Skyborne. Not the
+  worgen's human form (`humanmaletransform_hd`). Players' votes still count, for any file
+  Forever adds.
+* `/cri models` shows how many are built in and only the files seen on players.
+* Tests: 1526 checks (every race and sex's NPC from its built-in file, HD files, the worgen
+  form left out).
+
 ## [1.0.1] — 2026-10-03
 
 Shapeshifted portraits are left alone.
