@@ -26,6 +26,7 @@ Made by **Jedborg** (<https://github.com/JedborgWoW>).
 * **All the classic races**: Human, Dwarf, Night Elf, Gnome, Orc, Undead, Tauren and
   Troll, plus Forever's **Skyborne** (blood elves) — each male and female tuned on its own
   against the Classic client's real portraits.
+* Version 1.0.2 now also works on NPCs. 
 * **Orc male is limited**: Forever's orc male sits in a different position in its portrait
   than the Classic one, so it can't be framed exactly like Classic — it is tuned as close
   as the picture allows.
